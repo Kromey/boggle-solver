@@ -25,6 +25,7 @@ class Dictionary
 	 * @access private
 	 */
 	private $wordlist;
+	private $wordfile;
 	private $wordcount;
 
 	/**
@@ -76,13 +77,13 @@ class Dictionary
 	{
 		//Set up our index and initial values
 		$min = 0;
-		$max = $this->wordcount;
+		$max = $this->wordcount - 1;
 
 		//Run our binary search
-		while($min < $max - 1)
+		while(true)
 		{
 			//Compute our offset to find the middle
-			$offset = floor(($max - $min) / 2);
+			$offset = ($max - $min)>>1; //right-shift by 1 is the same as floor(x/2)
 			if($offset == 0)
 			{
 				//Offset of 0 means we've exhausted our search without finding the word
@@ -127,7 +128,6 @@ class Dictionary
 	private function processFile($file)
 	{
 		$this->wordlist = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-		//sort($this->wordlist, SORT_STRING);
 		$this->wordcount = count($this->wordlist);
 	}
 }
@@ -144,7 +144,6 @@ class Boggle
 	private $board;
 	private $dictionary;
 	private $wordlist;
-	private $score;
 
 	/**
 	 * __construct 
@@ -168,9 +167,6 @@ class Boggle
 
 		//Initialize an empty word list
 		$this->wordlist = array();
-
-		//Initialize empty score
-		$this->score = 0;
 	}
 
 	public function findWords()
@@ -203,7 +199,12 @@ class Boggle
 
 	public function printScore()
 	{
-		echo "This list of ".count($this->wordlist)." words is worth ".$this->score." points\n";
+		$score = 0;
+		foreach($this->wordlist as $word)
+		{
+			$score += $this->scoreWord($word);
+		}
+		echo "This list of ".count($this->wordlist)." words is worth ".$score." points\n";
 	}
 
 	/**
@@ -230,11 +231,39 @@ class Boggle
 			return false;
 		}
 
-		//It's valid per the rules, make sure we don't already have it
-		if(in_array($word, $this->wordlist) === true)
+		//Make sure we haven't already found this word - binary search
+		//Set up our index and initial values
+		$min = 0;
+		$max = count($this->wordlist) - 1;
+
+		//Run our binary search
+		while(true)
 		{
-			return false;
+			//Compute our offset to find the middle
+			$offset = ($max - $min)>>1; //right-shift by 1 is the same as floor(x/2)
+			if($offset == 0)
+			{
+				//Offset of 0 means we've exhausted our search without finding the word
+				break;
+			}
+
+			$cmpWord = $this->wordlist[$min + $offset];
+
+			//Perform our string comparison
+			$cmp = strcmp($cmpWord, $word);
+			if($cmp == 0)
+			{
+				//We found it!
+				return false;
+			} elseif($cmp < 0) {
+				//Our target word is in the top half
+				$min += $offset;
+			} elseif($cmp > 0) {
+				//Our target word is in the bottom half
+				$max = $min + $offset;
+			}
 		}
+		//End binary search
 
 		//We haven't already found it - is it in our dictionary?
 		return $this->dictionary->findWord($word);
@@ -252,6 +281,12 @@ class Boggle
 	 */
 	private function wordCanBeValid($word)
 	{
+		//Don't look up every 1- or 2-letter combination
+		if(strlen($word) < 3)
+		{
+			return true;
+		}
+
 		return $this->dictionary->findWord($word, true);
 	}
 
@@ -280,8 +315,17 @@ class Boggle
 			return;
 		}
 
-		//validate $x and $y
-		if($x > 3 || $x < 0 || $y > 3 || $y < 0)
+		/**
+		 * Validate $x and $y
+		 * The following statement is equivalent to
+		 * if($x > 3 || $x < 0 || $y > 3 || $y < 0)
+		 * thanks to the fact that 3 is 11 in binary,
+		 * and negative numbers use two's complement.
+		 * Admittedly a very small performance gain,
+		 * but a gain nonetheless. (The bitwise NOT
+		 * of 3 is 0xFFFC for a 32-bit integer.)
+		 */
+		if((($x | $y) & 0xFFFC) != 0)
 		{
 			return;
 		}
@@ -300,8 +344,19 @@ class Boggle
 		if($this->wordIsValid($word))
 		{
 			$this->wordlist[] = $word;
-			//bubbleInsert($this->wordlist, $word);
-			$this->scoreWord($word);
+			//We need to keep our wordlist sorted - modified bubble sort
+			for($i = count($this->wordlist)-2; $i >= 0; $i--)
+			{
+				$cmp = strcmp($this->wordlist[$i], $this->wordlist[$i+1]);
+				if($cmp > 0)
+				{
+					$temp = $this->wordlist[$i];
+					$this->wordlist[$i] = $this->wordlist[$i+1];
+					$this->wordlist[$i+1] = $temp;
+				} else {
+					break;
+				}
+			}
 		} else {
 			//check if this can be a valid word
 			//this check is here because wordCanBeValid will always return true if wordIsValid does
@@ -326,15 +381,15 @@ class Boggle
 		$len = strlen($word);
 		if($len >= 8)
 		{
-			$this->score += 11;
+			return 11;
 		} elseif($len >= 7) {
-			$this->score += 5;
+			return 5;
 		} elseif($len >= 6) {
-			$this->score += 3;
+			return 3;
 		} elseif($len >= 5) {
-			$this->score += 2;
+			return 2;
 		} elseif($len >= 3) {
-			$this->score += 1;
+			return 1;
 		}
 	}
 }
@@ -344,6 +399,7 @@ ini_set('memory_limit', '128M');
 
 $board = new Boggle($argv[1]);
 $board->findWords();
+//$board->printBoard();
 $board->printFoundWords();
-$board->printScore();
+//$board->printScore();
 
